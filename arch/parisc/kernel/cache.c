@@ -18,6 +18,7 @@
 #include <linux/seq_file.h>
 #include <linux/pagemap.h>
 #include <linux/sched.h>
+#include <linux/sched/mm.h>
 #include <asm/pdc.h>
 #include <asm/cache.h>
 #include <asm/cacheflush.h>
@@ -393,6 +394,15 @@ void __init parisc_setup_cache_timing(void)
 
 	/* calculate TLB flush threshold */
 
+	/* On SMP machines, skip the TLB measure of kernel text which
+	 * has been mapped as huge pages. */
+	if (num_online_cpus() > 1 && !parisc_requires_coherency()) {
+		threshold = max(cache_info.it_size, cache_info.dt_size);
+		threshold *= PAGE_SIZE;
+		threshold /= num_online_cpus();
+		goto set_tlb_threshold;
+	}
+
 	alltime = mfctl(16);
 	flush_tlb_all();
 	alltime = mfctl(16) - alltime;
@@ -411,6 +421,8 @@ void __init parisc_setup_cache_timing(void)
 		alltime, size, rangetime);
 
 	threshold = PAGE_ALIGN(num_online_cpus() * size * alltime / rangetime);
+
+set_tlb_threshold:
 	if (threshold)
 		parisc_tlb_flush_threshold = threshold;
 	printk(KERN_INFO "TLB flush threshold set to %lu KiB\n",
@@ -560,24 +572,6 @@ void flush_cache_mm(struct mm_struct *mm)
 			__flush_cache_page(vma, addr, PFN_PHYS(pfn));
 		}
 	}
-}
-
-void
-flush_user_dcache_range(unsigned long start, unsigned long end)
-{
-	if ((end - start) < parisc_cache_flush_threshold)
-		flush_user_dcache_range_asm(start,end);
-	else
-		flush_data_cache();
-}
-
-void
-flush_user_icache_range(unsigned long start, unsigned long end)
-{
-	if ((end - start) < parisc_cache_flush_threshold)
-		flush_user_icache_range_asm(start,end);
-	else
-		flush_instruction_cache();
 }
 
 void flush_cache_range(struct vm_area_struct *vma,
